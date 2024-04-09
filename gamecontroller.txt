@@ -1,0 +1,188 @@
+import cv2
+import mediapipe
+import traceback
+import math
+import keyboard
+
+# It shows small points and coordinates on the tip of fingers
+
+
+def show(i, frame):
+    if i is not None:
+        coor = mediapipe.solutions.drawing_utils._normalized_to_pixel_coordinates(
+            i.x, i.y, fw, fh
+        )
+        if coor is not None:
+            frame = cv2.circle(frame, coor, 5, (0, 0, 255), -1)
+            cv2.putText(
+                frame,
+                str(coor),
+                (coor[0] + 10, coor[1] + 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 0, 0),
+                2,
+            )
+    return frame
+
+
+# This function is used for pressing and releasing the keyboard buttons
+
+
+def keybd(ratio, frame):
+    if ratio is not None:
+        if ratio >= 0.35:
+            keyboard.release("left arrow")
+            keyboard.press("right arrow")
+            cv2.putText(
+                frame, "GAS", (40, 130), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3
+            )
+        elif ratio < 0.2:
+            keyboard.release("right arrow")
+            keyboard.press("left arrow")
+            cv2.putText(
+                frame, "BRAKE", (40, 130), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3
+            )
+        else:
+            keyboard.release("left arrow")
+            keyboard.release("right arrow")
+            cv2.putText(
+                frame,
+                "NEUTRAL",
+                (40, 130),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 255),
+                3,
+            )
+    else:
+        keyboard.release("left arrow")
+        keyboard.release("right arrow")
+
+try:
+
+    capture = cv2.VideoCapture(0)
+    fw = capture.get(cv2.CAP_PROP_FRAME_WIDTH)
+    fh = capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
+
+    # Detecting Fingers
+    with mediapipe.solutions.hands.Hands(
+        static_image_mode=False,
+        min_detection_confidence=0.7,
+        min_tracking_confidence=0.7,
+        max_num_hands=1,
+    ) as hands:
+        while capture.isOpened():
+            ret, frame = capture.read()
+            if ret == False:
+                continue
+
+            frame = cv2.flip(frame, 1)
+            results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+            # Collecting coordinates of 6 hand landmarks
+            if results.multi_hand_landmarks != None:
+                thumb = results.multi_hand_landmarks[0].landmark[
+                    mediapipe.solutions.hands.HandLandmark.THUMB_TIP
+                ]
+                index = results.multi_hand_landmarks[0].landmark[
+                    mediapipe.solutions.hands.HandLandmark.INDEX_FINGER_TIP
+                ]
+                middle = results.multi_hand_landmarks[0].landmark[
+                    mediapipe.solutions.hands.HandLandmark.MIDDLE_FINGER_TIP
+                ]
+                ring = results.multi_hand_landmarks[0].landmark[
+                    mediapipe.solutions.hands.HandLandmark.RING_FINGER_TIP
+                ]
+                little = results.multi_hand_landmarks[0].landmark[
+                    mediapipe.solutions.hands.HandLandmark.PINKY_TIP
+                ]
+                wri = results.multi_hand_landmarks[0].landmark[
+                    mediapipe.solutions.hands.HandLandmark.WRIST
+                ]
+
+                a = [thumb, index, middle, ring, little]
+                x0 = 0
+                y0 = 0
+
+                # Calculating the centroid of 5 finger's tips
+                for i in a:
+                    x0 += i.x
+                    y0 += i.y
+                c = (x0 / 5, y0 / 5)
+                centroid = (
+                    mediapipe.solutions.drawing_utils._normalized_to_pixel_coordinates(
+                        c[0], c[1], fw, fh
+                    )
+                )
+                if centroid is not None:
+                    frame = cv2.circle(frame, centroid, 5, (0, 255, 0), -1)
+                    cv2.putText(
+                        frame,
+                        str(centroid),
+                        (centroid[0] + 10, centroid[1] + 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 0, 0),
+                        2,
+                    )
+
+                # Calculating the ratio(r/s) of distance between the centroid, avg of 5 fingers (r) and the centroid,wrist (s)
+                wrist = (
+                    mediapipe.solutions.drawing_utils._normalized_to_pixel_coordinates(
+                        wri.x, wri.y, fw, fh
+                    )
+                )
+                if wrist is not None and centroid is not None and all(a):
+                    frame = cv2.circle(frame, wrist, 5, (0, 0, 255), -1)
+                    cv2.putText(
+                        frame,
+                        str(wrist),
+                        (wrist[0] + 10, wrist[1] + 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 0, 0),
+                        2,
+                    )
+                    dis = []
+                    for i in a:
+                        v = mediapipe.solutions.drawing_utils._normalized_to_pixel_coordinates(
+                            i.x, i.y, fw, fh
+                        )
+                        if v is not None:
+                            dis.append(math.dist(v, centroid))
+                    if len(dis) == 5:
+                        r = sum(dis) / 5
+                        s = math.dist(centroid, wrist)
+                        cv2.putText(
+                            frame,
+                            "Ratio:- " + str(round(r / s, 2)),
+                            (20, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1,
+                            (255, 0, 0),
+                            2,
+                        )
+
+                        # Clicking keyboard buttons
+                        keybd(r / s, frame)
+
+                frame = show(thumb, frame)
+                frame = show(index, frame)
+                frame = show(middle, frame)
+                frame = show(ring, frame)
+                frame = show(little, frame)
+
+            cv2.imshow("HCR Game Controller", frame)
+
+            if cv2.waitKey(1) == 27:  # Escape(ESC.) key
+                break
+
+    cv2.destroyAllWindows()
+    capture.release()
+
+except:
+
+    cv2.destroyAllWindows()
+    capture.release()
+    traceback.print_exc()
